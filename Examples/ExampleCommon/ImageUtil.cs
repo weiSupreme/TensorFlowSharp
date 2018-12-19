@@ -5,10 +5,13 @@ namespace ExampleCommon
 {
 	public static class ImageUtil
 	{
-		// Convert the image in filename to a Tensor suitable as input to the Inception model.
-		public static TFTensor CreateTensorFromImageFile (string file, TFDataType destinationDataType = TFDataType.Float)
+        static byte[] contents = new byte[656*490];
+        static byte[] crop = new byte[336 * 336];
+        // Convert the image in filename to a Tensor suitable as input to the Inception model.
+        public static TFTensor CreateTensorFromImageFile (string file, TFDataType destinationDataType = TFDataType.Float)
 		{
-			var contents = File.ReadAllBytes (file);
+			contents = File.ReadAllBytes (file);
+            System.Buffer.BlockCopy(contents, 99712, crop, 0, 336 * 336);
 
 			// DecodeJpeg uses a scalar String-valued tensor as input.
 			var tensor = TFTensor.CreateString (contents);
@@ -58,7 +61,7 @@ namespace ExampleCommon
 					x: graph.ResizeBilinear (
 						images: graph.ExpandDims (
 							input: graph.Cast (
-								graph.DecodeJpeg (contents: input, channels: 3), DstT: TFDataType.Float),
+								graph.DecodeBmp (contents: input, channels: 1), DstT: TFDataType.Float),
 							dim: graph.Const (0, "make_batch")),
 						size: graph.Const (new int [] { W, H }, "size")),
 					y: graph.Const (Mean, "mean")),
