@@ -37,9 +37,9 @@ using System.IO.Compression;
 using System.Net;
 using System.Collections.Generic;
 using ExampleCommon;
-using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Imaging;
+using System.Text;
 
 namespace ExampleInceptionInference
 {
@@ -77,36 +77,42 @@ namespace ExampleInceptionInference
                     Console.WriteLine(((TFOperation)obj).Name);
                 }*/
                 //while(true)
-                float[] eimg = new float[224 * 224];
-                for (int i = 0; i < 224 * 224; i++)
-                    eimg[i] = 0;
-                TFTensor ten = TFTensor.FromBuffer(tfs, eimg, 0, 224 * 224 * 1);
-                for (int j=0;j<3;j++)
-                {
-                    var runner = session.GetRunner();
-                    runner.AddInput(graph["images"][0], ten).Fetch(graph["classes"].Name);
-                    var output = runner.Run();
-                }
-                ten.Dispose();
-                string[] files = Directory.GetFiles("tzb/images/defect", "*.*");
+                //string[] files = Directory.GetFiles("tzb/images/C2", "*.*");
+                string[] files = Directory.GetFiles("D:/实习/DL/jiu/train", "*.*");
                 //while(true)
+                //FileStream fs = new FileStream("res.txt", FileMode.Create);
+                int cnt = 0;
                 foreach (string file in files)
                 {
+                    //Console.WriteLine(file);
                     DateTime bft = DateTime.Now;
-                    //var tensor = Image2Tensor(file);
+                    var tensor = Image2Tensor(file);
+                    //DateTime bft = DateTime.Now;
+                    //DateTime aft = DateTime.Now;
                     //break;
-                    var tensor = ImageUtil.CreateTensorFromImageFile(file);
-                    //TFTensor tensor = TFTensor.FromBuffer(tfs, eimg, 0, 224 * 224);
                     var runner = session.GetRunner();
                     runner.AddInput(graph["images"][0], tensor).Fetch(graph["classes"].Name);
                     var output = runner.Run();
                     DateTime aft = DateTime.Now;
                     TimeSpan ts = aft.Subtract(bft);
-                    System.Threading.Thread.Sleep(50);
+                   // System.Threading.Thread.Sleep(50);
                     var result = output[0];
                     int class_ = ((int[])result.GetValue(jagged: true))[0];
-                    Console.WriteLine(file + " best_match: " + class_ + " " + labels[class_] + " time: " + ts.TotalMilliseconds);
+                    if (class_ == 1)
+                    {
+                        cnt++;
+                        Console.WriteLine(file + " best_match: " + class_ + " " + labels[class_] + " time: " + ts.TotalMilliseconds+" number:"+ cnt.ToString());
+                        //获得字节数组
+                        //byte[] data = System.Text.Encoding.Default.GetBytes(Path.GetFileName(file) + "\n");
+                        //开始写入
+                        //fs.Write(data, 0, data.Length);
+                    }
                 }
+                //清空缓冲区、关闭流
+                //fs.Flush();
+                //fs.Close();
+                Console.Write("finish");
+                Console.ReadLine(); //等待用户按一个回车
             }
 		}
 
@@ -115,34 +121,32 @@ namespace ExampleInceptionInference
         static TFTensor Image2Tensor(string path)
         {
             //先截取感兴趣区域
-            Bitmap img = new Bitmap(path);
+            Bitmap img_ = new Bitmap(path);
             Rectangle rect = new Rectangle(145, 153, cropSize, cropSize);
-            BitmapData srcData = img.LockBits(rect, ImageLockMode.ReadWrite, PixelFormat.Format8bppIndexed);
+            //Rectangle rect = new Rectangle(120, 50, cropSize, cropSize);
+            Bitmap img = img_.Clone(rect, PixelFormat.Format8bppIndexed);
+            BitmapData srcData = img.LockBits(new Rectangle(0,0,cropSize,cropSize), ImageLockMode.ReadWrite, PixelFormat.Format8bppIndexed);
             System.IntPtr srcPtr = srcData.Scan0;
-            byte[] cropArr = new byte[srcData.Stride * cropSize];
-            float[] resizeArr = new float[resizeSize * resizeSize];
-            System.Runtime.InteropServices.Marshal.Copy(srcPtr, cropArr, 0, srcData.Stride * cropSize);
-            float scale = (float)cropSize / resizeSize;
-            //Bitmap savedimg = new Bitmap(resizeSize, resizeSize);
-            for (int w=0;w< resizeSize; w++)
-            {
-                int sx = (int)(w * scale);
-                if (sx >= cropSize)
-                    sx = cropSize - 1;
-                for(int h = 0; h < resizeSize; h++)
-                {
-                    int sy = (int)(h * scale);
-                    if (sy >= cropSize)
-                        sy = cropSize - 1;
-                    resizeArr[w * resizeSize + h] = cropArr[sx * srcData.Stride + sy]/255f;
-                    //int pix = cropArr[sx * srcData.Stride + sy];
-                    //savedimg.SetPixel(h,w, Color.FromArgb(pix,pix,pix));
-                }
-            }
+            byte[] cropArr = new byte[cropSize * cropSize];
+            System.Runtime.InteropServices.Marshal.Copy(srcPtr, cropArr, 0, cropSize * cropSize);
             img.UnlockBits(srcData);
-            //savedimg.Save("images/cropImage.bmp",ImageFormat.Bmp);
-            TFTensor tensor = TFTensor.FromBuffer(tfs,resizeArr,0,resizeSize*resizeSize);
+            TFShape tfs_ = new TFShape(cropSize, cropSize, 1);
+            TFTensor tensor = TFTensor.FromBuffer(tfs_,cropArr,0,cropSize*cropSize);
             return tensor;
         }
-	}
+
+        static TFTensor Image2Tensor2(string path)
+        {
+            //先截取感兴趣区域
+            Bitmap img = new Bitmap(path);
+            BitmapData srcData = img.LockBits(new Rectangle(0, 0, 224, 224), ImageLockMode.ReadWrite, PixelFormat.Format8bppIndexed);
+            System.IntPtr srcPtr = srcData.Scan0;
+            byte[] cropArr = new byte[224 * 224];
+            System.Runtime.InteropServices.Marshal.Copy(srcPtr, cropArr, 0, 224 * 224);
+            img.UnlockBits(srcData);
+            TFShape tfs_ = new TFShape(224, 224, 1);
+            TFTensor tensor = TFTensor.FromBuffer(tfs_, cropArr, 0, 224 * 224);
+            return tensor;
+        }
+    }
 }

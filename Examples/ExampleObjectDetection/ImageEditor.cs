@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Drawing;
+using System.Drawing.Imaging;
 
 namespace ExampleCommon
 {
@@ -13,6 +14,7 @@ namespace ExampleCommon
 		private string _fontFamily;
 		private float _fontSize;
 		private string _outputFile;
+        private Bitmap bmp;
 
 		public ImageEditor (string inputFile, string outputFile, string fontFamily = "Ariel", float fontSize = 12)
 		{
@@ -28,8 +30,16 @@ namespace ExampleCommon
 			_fontSize = fontSize;
 			_outputFile = outputFile;
 
-			_image = Bitmap.FromFile (inputFile);
-			_graphics = Graphics.FromImage (_image);
+			_image = Bitmap.FromFile(inputFile);
+            bmp = new Bitmap(_image.Width, _image.Height, PixelFormat.Format32bppArgb);
+            using (Graphics g = Graphics.FromImage(bmp))
+            {
+                g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighQuality;
+                g.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighQuality;
+                g.DrawImage(_image, 0, 0);
+            }
+            _graphics = Graphics.FromImage (bmp);
 		}
 
 		/// <summary>
@@ -43,14 +53,14 @@ namespace ExampleCommon
 		/// <param name="colorName"></param>
 		public void AddBox (float xmin, float xmax, float ymin, float ymax, string text = "", string colorName = "red")
 		{
-			var left = xmin * _image.Width;
-			var right = xmax * _image.Width;
-			var top = ymin * _image.Height;
-			var bottom = ymax * _image.Height;
+            var left = xmin * 384 + 121;// _image.Width;
+            var right = xmax * 384 + 121;// _image.Width;
+            var top = ymin * 384 + 105;// _image.Height;
+            var bottom = ymax * 384 + 105;// _image.Height;
 
 
 			var imageRectangle = new Rectangle (new Point (0, 0), new Size (_image.Width, _image.Height));
-			_graphics.DrawImage (_image, imageRectangle);
+			_graphics.DrawImage (bmp, imageRectangle);
 
 			Color color = Color.FromName(colorName);
 			Brush brush = new SolidBrush (color);
@@ -64,8 +74,8 @@ namespace ExampleCommon
 
 		public void Dispose ()
 		{
-			if (_image != null) {
-				_image.Save (_outputFile);
+			if (bmp != null) {
+				bmp.Save (_outputFile);
 
 				if (_graphics != null) {
 					_graphics.Dispose ();

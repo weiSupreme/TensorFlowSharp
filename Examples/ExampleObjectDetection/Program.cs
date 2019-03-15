@@ -10,138 +10,121 @@ using System.Reflection;
 using System.Net;
 using ICSharpCode.SharpZipLib.Tar;
 using ICSharpCode.SharpZipLib.GZip;
+using System.Drawing;
+using System.Drawing.Imaging;
 
 namespace ExampleObjectDetection
 {
 	class Program
 	{
-		private static IEnumerable<CatalogItem> _catalog;
-		private static string _currentDir = Path.GetDirectoryName (Assembly.GetExecutingAssembly ().Location);
-		private static string _input_relative = "test_images/input.jpg";
-		private static string _output_relative = "test_images/output.jpg";
-		private static string _input = Path.Combine (_currentDir, _input_relative);
-		private static string _output = Path.Combine (_currentDir, _output_relative);
-		private static string _catalogPath;
-		private static string _modelPath;
 
 		private static double MIN_SCORE_FOR_OBJECT_HIGHLIGHTING = 0.5;
 
-		static OptionSet options = new OptionSet ()
+        static TFShape tfs = new TFShape(1, 320, 320,3);
+
+
+        /// <param name="args"></param>
+        static void Main (string [] args)
 		{
-			{ "input_image=",  "Specifies the path to an image ", v => _input = v },
-			{ "output_image=",  "Specifies the path to the output image with detected objects", v => _output = v },
-			{ "catalog=", "Specifies the path to the .pbtxt objects catalog", v=> _catalogPath = v},
-			{ "model=", "Specifies the path to the trained model", v=> _modelPath = v},
-			{ "h|help", v => Help () }
-		};
+            TFSessionOptions options = new TFSessionOptions();
+            using (var graph = new TFGraph())
+            {
+                var model = File.ReadAllBytes("model/frozen_inference_graph.pb");
+                graph.Import(new TFBuffer(model));
+                using (var session = new TFSession(graph))
+                {
+                    string[] labels = File.ReadAllLines("labels.txt");
+                    //while(true)
+                    string[] files = Directory.GetFiles("t2", "*.*");
+                    //while(true)
+                    //FileStream fs = new FileStream("res.txt", FileMode.Create);
+                    int cnt = 0;
+                    foreach (string file in files)
+                    {
+                        //Console.WriteLine(file);
+                        DateTime bft = DateTime.Now;
+                        var tensor = Image2Tensor(file);
+                        //DateTime bft = DateTime.Now;
+                        //DateTime aft = DateTime.Now;
+                        //break;
+                        var runner = session.GetRunner();
+                        runner
+                            .AddInput(graph["image_tensor"][0], tensor)
+                            .Fetch(
+                            graph["detection_boxes"][0],
+                            graph["detection_scores"][0],
+                            graph["detection_classes"][0],
+                            graph["num_detections"][0]);
+                        var output = runner.Run();
 
-		/// <summary>
-		/// Run the ExampleObjectDetection util from command line. Following options are available:
-		/// input_image - optional, the path to the image for processing (the default is 'test_images/input.jpg')
-		/// output_image - optional, the path where the image with detected objects will be saved (the default is 'test_images/output.jpg')
-		/// catalog - optional, the path to the '*.pbtxt' file (by default, 'mscoco_label_map.pbtxt' been loaded)
-		/// model - optional, the path to the '*.pb' file (by default, 'frozen_inference_graph.pb' model been used, but you can download any other from here 
-		/// https://github.com/tensorflow/models/blob/master/object_detection/g3doc/detection_model_zoo.md or train your own)
-		/// 
-		/// for instance, 
-		/// ExampleObjectDetection --input_image="/demo/input.jpg" --output_image="/demo/output.jpg" --catalog="/demo/mscoco_label_map.pbtxt" --model="/demo/frozen_inference_graph.pb"
-		/// </summary>
-		/// <param name="args"></param>
-		static void Main (string [] args)
-		{
-			options.Parse (args);
+                        var boxes = (float[,,])output[0].GetValue(jagged: false);
+                        var scores = (float[,])output[1].GetValue(jagged: false);
+                        var classes = (float[,])output[2].GetValue(jagged: false);
+                        var num = (float[])output[3].GetValue(jagged: false);
+                        DateTime aft = DateTime.Now;
+                        if (num[0] > 7)
+                        {
+                            Dictionary<int[], string> dict = new Dictionary<int[], string>();
+                            int num1 = CreateDict(boxes, classes, labels, ref dict);
+                            foreach (int[] key in dict.Keys)
+                                Console.WriteLine("box: {0} {1} {2} {3}, class: {4}", key[0], key[1], key[2], key[3], dict[key]);
+                        }
+                        Console.WriteLine("time: {0} ms",(aft - bft).TotalMilliseconds.ToString());
+                        cnt++;
+                    }
+                }
+            }
+            Console.ReadLine();
+        }
 
-			if (_catalogPath == null) {
-				_catalogPath = DownloadDefaultTexts (_currentDir);
-			}
+        static int cropTLX = 121;
+        static int cropTLY = 105;
+        private static int CreateDict(float[,,] boxes, float[,] classes, string[] labels, ref Dictionary<int[], string> dict)
+        {
+            int mean = 0;
+            int num1 = 0;
+            var y = boxes.GetLength(1);
+            var z = boxes.GetLength(2);
+            Dictionary<int[], string> dict1 = new Dictionary<int[], string>();
+            Dictionary<int[], string> dict2 = new Dictionary<int[], string>();
+            for (int j = 0; j < y; j++)
+            {
+                int[] box = new int[z];
+                for (int k = 0; k < z; k++)
+                {
+                    var coord = boxes[0, j, k];
+                    if (k % 2 == 0)
+                    {
+                        box[k] = (int)(coord * cropSize + cropTLY);
+                        if (0 == k)
+                            mean += box[0];
+                    }
+                    else
+                        box[k] = (int)(coord * cropSize + cropTLX);
+                }
+                int value = Convert.ToInt32(classes[0, j]);
+                dict.Add(box, labels[value-1]);
+            }
+            mean = (int)(mean / y);
+            foreach (int[] key in dict.Keys)
+            {
+                if (mean > key[0])
+                {
+                    dict1.Add(key, dict[key]);
+                    num1 += 1;
+                }
+                else
+                {
+                    dict2.Add(key, dict[key]);
+                }
+            }
+            dict1 = dict1.OrderBy(kv => kv.Key[1]).ToDictionary(k => k.Key, v => v.Value);
+            dict2 = dict2.OrderBy(kv => kv.Key[1]).ToDictionary(k => k.Key, v => v.Value);
+            dict = dict1.Concat(dict2).ToDictionary(k => k.Key, v => v.Value);
+            return num1;
+        }
 
-			if (_modelPath == null) {
-				_modelPath = DownloadDefaultModel (_currentDir);
-			}
-
-			_catalog = CatalogUtil.ReadCatalogItems (_catalogPath);
-			var fileTuples = new List<(string input, string output)> () { (_input, _output) };
-			string modelFile = _modelPath;
-
-			using (var graph = new TFGraph ()) {
-				var model = File.ReadAllBytes (modelFile);
-				graph.Import (new TFBuffer (model));
-
-				using (var session = new TFSession (graph)) {
-					Console.WriteLine("Detecting objects");
-
-					foreach (var tuple in fileTuples) {
-						var tensor = ImageUtil.CreateTensorFromImageFile (tuple.input, TFDataType.UInt8);
-						var runner = session.GetRunner ();
-
-
-						runner
-							.AddInput (graph ["image_tensor"] [0], tensor)
-							.Fetch (
-							graph ["detection_boxes"] [0],
-							graph ["detection_scores"] [0],
-							graph ["detection_classes"] [0],
-							graph ["num_detections"] [0]);
-						var output = runner.Run ();
-
-						var boxes = (float [,,])output [0].GetValue (jagged: false);
-						var scores = (float [,])output [1].GetValue (jagged: false);
-						var classes = (float [,])output [2].GetValue (jagged: false);
-						var num = (float [])output [3].GetValue (jagged: false);
-
-						DrawBoxes (boxes, scores, classes, tuple.input, tuple.output, MIN_SCORE_FOR_OBJECT_HIGHLIGHTING);
-						Console.WriteLine($"Done. See {_output_relative}");
-					}
-				}
-			}
-		}
-
-		private static string DownloadDefaultModel (string dir)
-		{
-			string defaultModelUrl = ConfigurationManager.AppSettings["DefaultModelUrl"] ?? throw new ConfigurationErrorsException("'DefaultModelUrl' setting is missing in the configuration file");
-
-			var modelFile = Path.Combine (dir, "faster_rcnn_inception_resnet_v2_atrous_coco_11_06_2017/frozen_inference_graph.pb");
-			var zipfile = Path.Combine (dir, "faster_rcnn_inception_resnet_v2_atrous_coco_11_06_2017.tar.gz");
-
-			if (File.Exists (modelFile))
-				return modelFile;
-
-			if (!File.Exists (zipfile)) {
-				Console.WriteLine("Downloading default model");
-				var wc = new WebClient ();
-				wc.DownloadFile (defaultModelUrl, zipfile);
-			}
-
-			ExtractToDirectory (zipfile, dir);
-			File.Delete (zipfile);
-
-			return modelFile;
-		}
-
-		private static void ExtractToDirectory (string file, string targetDir)
-		{
-			Console.WriteLine("Extracting");
-
-			using (Stream inStream = File.OpenRead (file))
-			using (Stream gzipStream = new GZipInputStream (inStream)) {
-				TarArchive tarArchive = TarArchive.CreateInputTarArchive (gzipStream);
-				tarArchive.ExtractContents (targetDir);
-			}
-		}
-
-		private static string DownloadDefaultTexts (string dir)
-		{
-			Console.WriteLine("Downloading default label map");
-
-			string defaultTextsUrl = ConfigurationManager.AppSettings ["DefaultTextsUrl"] ?? throw new ConfigurationErrorsException ("'DefaultTextsUrl' setting is missing in the configuration file");
-			var textsFile = Path.Combine (dir, "mscoco_label_map.pbtxt");
-			var wc = new WebClient ();
-			wc.DownloadFile (defaultTextsUrl, textsFile);
-
-			return textsFile;
-		}
-
-		private static void DrawBoxes (float [,,] boxes, float [,] scores, float [,] classes, string inputFile, string outputFile, double minScore)
+        private static void DrawBoxes (float [,,] boxes, float [,] scores, float [,] classes, string[] label, string inputFile, string outputFile, double minScore)
 		{
 			var x = boxes.GetLength (0);
 			var y = boxes.GetLength (1);
@@ -174,16 +157,42 @@ namespace ExampleObjectDetection
 						}
 
 						int value = Convert.ToInt32 (classes [i, j]);
-						CatalogItem catalogItem = _catalog.FirstOrDefault (item => item.Id == value);
-						editor.AddBox (xmin, xmax, ymin, ymax, $"{catalogItem.DisplayName} : {(scores [i, j] * 100).ToString ("0")}%");
+						editor.AddBox (xmin, xmax, ymin, ymax, label[value-1]);
 					}
 				}
 			}
 		}
 
-		private static void Help ()
-		{
-			options.WriteOptionDescriptions (Console.Out);
-		}
-	}
+        static int cropSize = 384;
+        static TFTensor Image2Tensor(string path)
+        {
+            //先截取感兴趣区域
+            Bitmap img_ = new Bitmap(path);
+            Rectangle rect = new Rectangle(121, 105, cropSize, cropSize);
+            //Rectangle rect = new Rectangle(120, 50, cropSize, cropSize);
+            Bitmap img = img_.Clone(rect, PixelFormat.Format8bppIndexed);
+            BitmapData srcData = img.LockBits(new Rectangle(0, 0, cropSize, cropSize), ImageLockMode.ReadWrite, PixelFormat.Format8bppIndexed);
+            System.IntPtr srcPtr = srcData.Scan0;
+            byte[] cropArr = new byte[cropSize * cropSize];
+            System.Runtime.InteropServices.Marshal.Copy(srcPtr, cropArr, 0, cropSize * cropSize);
+            img.UnlockBits(srcData);
+            TFShape tfs_ = new TFShape(cropSize, cropSize, 1);
+            TFTensor tensor = TFTensor.FromBuffer(tfs_, cropArr, 0, cropSize * cropSize);
+            return tensor;
+        }
+
+        static TFTensor Image2Tensor2(string path)
+        {
+            //先截取感兴趣区域
+            Bitmap img = new Bitmap(path);
+            BitmapData srcData = img.LockBits(new Rectangle(0, 0, 224, 224), ImageLockMode.ReadWrite, PixelFormat.Format8bppIndexed);
+            System.IntPtr srcPtr = srcData.Scan0;
+            byte[] cropArr = new byte[224 * 224];
+            System.Runtime.InteropServices.Marshal.Copy(srcPtr, cropArr, 0, 224 * 224);
+            img.UnlockBits(srcData);
+            TFShape tfs_ = new TFShape(224, 224, 1);
+            TFTensor tensor = TFTensor.FromBuffer(tfs_, cropArr, 0, 224 * 224);
+            return tensor;
+        }
+    }
 }
